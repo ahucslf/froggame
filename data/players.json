@@ -1,18 +1,1 @@
-{
-  "players": [
-    {
-      "name": "本地模式",
-      "score": 3600,
-      "level": 3,
-      "totalTime": 30,
-      "updatedAt": "2026-10-21T06:42:29.289Z"
-    },
-    {
-      "name": "GitHub存储测试",
-      "score": 8800,
-      "level": 7,
-      "totalTime": 60,
-      "updatedAt": "2026-10-21T06:42:42.114Z"
-    }
-  ]
-}
+{"players":[]}
