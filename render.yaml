@@ -14,3 +14,14 @@ services:
         value: production
       - key: DATA_DIR
         value: /opt/render/project/src/data
+      # ★ 数据持久化 ★
+      # Render 免费版用临时文件系统，部署或空闲休眠唤醒都会清空数据。
+      # 配上下面两个变量，数据就会存到 GitHub 仓库，实例重启也不丢。
+      # GITHUB_TOKEN 在 Render 后台 → Environment 里设为 Secret（不要提交到仓库）
+      # GITHUB_REPO  设为 ahucslf/froggame
+      - key: GITHUB_REPO
+        value: ahucslf/froggame
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_FILE
+        value: data/players.json

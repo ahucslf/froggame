@@ -152,3 +152,61 @@ Godot 的 HTTPClient 不回退 IPv4，会导致游戏连不上。
 | `PORT` | `8848` | 云平台会自动注入，不用管 |
 | `HOST` | `::` | 双栈监听，同时接 IPv4/IPv6 |
 | `DATA_DIR` | `./data` | 想用持久磁盘就改成 `/data` |
+
+---
+
+## 💾 数据持久化（重要）
+
+### 问题
+
+Render **免费版**的 web service 用的是**临时文件系统**：
+
+- 部署新代码 → 实例重启 → 数据全没
+- **空闲 15 分钟 → 实例休眠 → 唤醒时又重启 → 数据再没**
+
+玩家玩一局中间停顿一下，排名就没了。
+
+### 解决方案：数据存到 GitHub 仓库
+
+服务支持可选的 GitHub 存储后端。**配两个环境变量就自动启用**：
+
+| 环境变量 | 值 |
+|---|---|
+| `GITHUB_TOKEN` | GitHub Personal Access Token（需 `repo` 权限） |
+| `GITHUB_REPO` | `ahucslf/froggame` |
+
+在 Render 后台配置：
+1. **Environment** 页面 → Add Environment Variable
+2. `GITHUB_TOKEN` = 你的令牌（类型选 **Secret**，不要提交到仓库）
+3. `GITHUB_REPO` = `ahucslf/froggame`
+
+### 令牌怎么拿
+
+GitHub → 右上角头像 → Settings → Developer settings →
+Personal access tokens → Tokens (classic) → Generate new token
+→ 勾选 **`repo`** → Generate → 复制（只显示一次）
+
+### 工作原理
+
+```
+启动时  → 从 GitHub 拉取 data/players.json 恢复数据
+提交时  → 先写本地文件（同步、立即生效）
+        → 再后台异步推送一份到 GitHub（不阻塞响应）
+```
+
+本地文件只是缓存，**真正的数据源是 GitHub**。所以实例重启、休眠唤醒都不会丢。
+
+### 验证是否生效
+
+打开 `https://你的域名/api/health`，看 `storage` 字段：
+
+```json
+{ "ok": true, "status": "healthy", "players": 0, "storage": "github" }
+```
+
+`storage` 是 `github` 就说明启用成功，是 `local` 说明环境变量没配对。
+
+### 不用 GitHub 存储行不行？
+
+行，但数据会在实例重启后丢失。只适合临时演示。
+

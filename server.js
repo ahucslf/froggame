@@ -4,11 +4,17 @@
  * 与本地开发版的差异：
  *   1. 端口从环境变量 PORT 读取（云平台会动态分配），不再是写死 8848
  *   2. 数据目录从环境变量 DATA_DIR 读取，支持云平台的临时磁盘
- *   3. 监听 0.0.0.0 而非 localhost，否则容器外无法访问
+ *   3. 监听 :: 双栈而非 localhost，Godot 的 HTTPClient 不回退 IPv4
  *   4. 新增 /api/health 健康检查端点（云平台探活用）
  *   5. 新增请求频率限制，防止被人恶意刷榜
  *   6. 写文件加锁，防止并发写入互相覆盖
  *   7. 保留完整 CORS 头，Web 导出的游戏跨域访问必需
+ *   8. ★ 可选的 GitHub 存储后端 ★ —— 解决 Render 免费版休眠重启丢数据的问题
+ *
+ * 存储后端（通过环境变量选择，不配就用本地文件）：
+ *   GITHUB_TOKEN   GitHub Personal Access Token（需 repo 权限）
+ *   GITHUB_REPO    仓库路径，例如 ahucslf/froggame
+ *   两个都配了 → 数据存到 GitHub，实例重启/休眠唤醒都不丢
  *
  * 本地运行：node server.js
  * 部署到 Render/Railway/Fly.io：直接上传整个文件夹即可
@@ -19,6 +25,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 // ─────────────────────────────────────────────────────────────
 // 配置（全部支持环境变量覆盖）
@@ -67,6 +74,135 @@ const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX = 20;
 
 // ─────────────────────────────────────────────────────────────
+// GitHub 存储后端（可选）
+// ─────────────────────────────────────────────────────────────
+//
+// ★ 为什么需要这个 ★
+// Render 免费版的 web service 用的是【临时文件系统】：
+//   - 部署新代码 → 实例重启 → 数据全没
+//   - 空闲 15 分钟 → 实例休眠 → 唤醒时又重启 → 数据再没
+// 玩家玩一局中间停顿一下，排名就没了。
+//
+// 解决办法：把数据存到 GitHub 仓库（免费、永久、容量足够）。
+// 配好 GITHUB_TOKEN 和 GITHUB_REPO 两个环境变量就自动启用，
+// 不配的话行为和之前完全一样（用本地文件）。
+
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_REPO = process.env.GITHUB_REPO || '';
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
+const GITHUB_FILE = process.env.GITHUB_FILE || 'data/players.json';
+/** GitHub API 超时（毫秒） */
+const GITHUB_TIMEOUT_MS = 15000;
+
+/** 是否启用了 GitHub 存储 */
+const USE_GITHUB = Boolean(GITHUB_TOKEN && GITHUB_REPO);
+
+/**
+ * 调用 GitHub Contents API。
+ * @param {string} method GET / PUT
+ * @param {string} apiPath API 路径
+ * @param {Object|null} payload PUT 的请求体
+ * @returns {Promise<Object>} { status, body }
+ */
+function githubApi(method, apiPath, payload) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.github.com',
+      port: 443,
+      path: apiPath,
+      method,
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'frogger-leaderboard',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    };
+    if (payload) {
+      options.headers['Content-Type'] = 'application/json';
+    }
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let parsed = {};
+        try { parsed = JSON.parse(data); } catch (_e) { parsed = {}; }
+        resolve({ status: res.statusCode, body: parsed });
+      });
+    });
+
+    req.setTimeout(GITHUB_TIMEOUT_MS, () => {
+      req.destroy();
+      resolve({ status: 0, body: {} });
+    });
+    req.on('error', () => resolve({ status: 0, body: {} }));
+
+    if (payload) {
+      req.write(JSON.stringify(payload));
+    }
+    req.end();
+  });
+}
+
+/**
+ * 从 GitHub 拉取数据文件。
+ * @returns {Promise<Array<Object>|null>} 玩家数组，失败或不存在返回 null
+ */
+async function githubLoad() {
+  const apiPath = `/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}?ref=${GITHUB_BRANCH}`;
+  const res = await githubApi('GET', apiPath, null);
+
+  if (res.status === 404) {
+    // 文件还不存在，属于正常情况
+    return null;
+  }
+  if (res.status !== 200) {
+    console.error(`[github] 读取失败，HTTP ${res.status}`);
+    return null;
+  }
+
+  try {
+    const content = Buffer.from(res.body.content || '', 'base64').toString('utf8');
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed.players) ? parsed.players : [];
+  } catch (err) {
+    console.error('[github] 数据解析失败:', err.message);
+    return null;
+  }
+}
+
+/**
+ * 把玩家数据写回 GitHub。
+ * @param {Array<Object>} players
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function githubSave(players) {
+  const apiPath = `/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`;
+  const content = JSON.stringify({ players }, null, 2);
+
+  // PUT 需要带上文件的 sha（如果已存在），先查一次
+  const getRes = await githubApi('GET', `${apiPath}?ref=${GITHUB_BRANCH}`, null);
+  const sha = (getRes.status === 200 && getRes.body.sha) ? getRes.body.sha : undefined;
+
+  const payload = {
+    message: 'chore: update leaderboard data',
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    branch: GITHUB_BRANCH
+  };
+  if (sha) {
+    payload.sha = sha;
+  }
+
+  const res = await githubApi('PUT', apiPath, payload);
+  if (res.status !== 200 && res.status !== 201) {
+    console.error(`[github] 写入失败，HTTP ${res.status}: ${JSON.stringify(res.body).slice(0, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────
 // 计分规则（必须与 Godot 端 leaderboard_service.gd 的 compute_score 一致）
 // ─────────────────────────────────────────────────────────────
 
@@ -95,6 +231,9 @@ function computeScore(levelCount, totalSeconds) {
 /** 写锁标志。Node 单线程，同一时刻只允许一个写操作 */
 let writeLock = false;
 
+/** 内存中的玩家数据。启动时加载，之后所有读写都基于它 */
+let playerCache = null;
+
 /** 确保数据目录存在 */
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -103,22 +242,26 @@ function ensureDataDir() {
   }
 }
 
-/** 读取全部玩家记录 */
+/** 读取全部玩家记录（从内存缓存，没有则从文件加载） */
 function loadPlayers() {
+  if (playerCache !== null) {
+    return playerCache;
+  }
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.players) ? parsed.players : [];
+    playerCache = Array.isArray(parsed.players) ? parsed.players : [];
   } catch (err) {
     if (err.code !== 'ENOENT') {
       console.error('[data] 读取失败:', err.message);
     }
-    return [];
+    playerCache = [];
   }
+  return playerCache;
 }
 
-/** 原子写入：先写临时文件再改名 */
-function savePlayers(players) {
+/** 原子写入本地文件：先写临时文件再改名 */
+function saveLocal(players) {
   if (writeLock) {
     console.warn('[data] 写锁被占用，跳过本次写入');
     return false;
@@ -136,6 +279,24 @@ function savePlayers(players) {
     return false;
   } finally {
     writeLock = false;
+  }
+}
+
+/**
+ * 保存数据：先写本地（同步、立即生效），再异步推 GitHub（不阻塞响应）。
+ * @param {Array<Object>} players
+ */
+function savePlayers(players) {
+  playerCache = players;
+  saveLocal(players);
+
+  if (USE_GITHUB) {
+    // 不 await —— 响应立刻返回，GitHub 写入在后台完成
+    githubSave(players).then((ok) => {
+      if (ok) {
+        console.log('[github] 数据已同步到仓库');
+      }
+    });
   }
 }
 
@@ -370,6 +531,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       status: 'healthy',
       players: loadPlayers().length,
+      storage: USE_GITHUB ? 'github' : 'local',
       uptime: Math.round(process.uptime())
     });
     return;
@@ -437,22 +599,61 @@ const server = http.createServer((req, res) => {
 // 启动
 // ─────────────────────────────────────────────────────────────
 
-ensureDataDir();
+/**
+ * 启动前的数据恢复。
+ *
+ * ★ 这是持久化的关键 ★
+ * 启用了 GitHub 存储时，先把仓库里的数据拉回内存 —— 这样实例重启、
+ * 空闲休眠唤醒都不会丢数据。Render 免费版每次部署/唤醒都是新实例，
+ * 不恢复就等于每次都从零开始。
+ */
+async function restoreData() {
+  ensureDataDir();
 
-server.listen({ port: PORT, host: HOST, ipv6Only: false }, () => {
-  console.log('┌─────────────────────────────────────────┐');
-  console.log('│  🐸 Frogger 排行榜服务已启动              │');
-  console.log('└─────────────────────────────────────────┘');
-  console.log(`  监听地址:  http://${HOST}:${PORT}  (双栈，IPv4+IPv6 都能连)`);
-  console.log(`  本机测试:  http://127.0.0.1:${PORT}`);
-  console.log(`  数据目录:  ${DATA_DIR}`);
-  console.log(`  数据文件:  ${DATA_FILE}`);
-  console.log(`  健康检查:  http://127.0.0.1:${PORT}/api/health`);
-  console.log('');
-  console.log('  可用环境变量：');
-  console.log(`    PORT      监听端口（当前 ${PORT}）`);
-  console.log(`    HOST      监听地址（当前 ${HOST}）`);
-  console.log(`    DATA_DIR  数据目录（当前 ${DATA_DIR}）`);
+  if (USE_GITHUB) {
+    console.log('[github] 正在从仓库恢复数据…');
+    const fromGithub = await githubLoad();
+    if (fromGithub !== null) {
+      playerCache = fromGithub;
+      // 本地也留一份，双保险
+      saveLocal(fromGithub);
+      console.log(`[github] 已恢复 ${fromGithub.length} 条记录`);
+    } else {
+      console.log('[github] 仓库里还没有数据文件，用本地数据初始化');
+      loadPlayers();
+    }
+  } else {
+    loadPlayers();
+    console.log(`[data] 已加载 ${loadPlayers().length} 条记录（本地文件）`);
+  }
+}
+
+/** 真正启动服务 */
+async function start() {
+  await restoreData();
+
+  server.listen({ port: PORT, host: HOST, ipv6Only: false }, () => {
+    console.log('┌─────────────────────────────────────────┐');
+    console.log('│  🐸 Frogger 排行榜服务已启动              │');
+    console.log('└─────────────────────────────────────────┘');
+    console.log(`  监听地址:  http://${HOST}:${PORT}  (双栈，IPv4+IPv6 都能连)`);
+    console.log(`  本机测试:  http://127.0.0.1:${PORT}`);
+    console.log(`  数据存储:  ${USE_GITHUB ? `GitHub 仓库 ${GITHUB_REPO}/${GITHUB_FILE}` : '本地文件（重启会丢）'}`);
+    console.log(`  数据目录:  ${DATA_DIR}`);
+    console.log(`  健康检查:  http://127.0.0.1:${PORT}/api/health`);
+    console.log('');
+    console.log('  可用环境变量：');
+    console.log(`    PORT          监听端口（当前 ${PORT}）`);
+    console.log(`    HOST          监听地址（当前 ${HOST}）`);
+    console.log(`    DATA_DIR      数据目录（当前 ${DATA_DIR}）`);
+    console.log(`    GITHUB_TOKEN  GitHub 令牌（未设置则用本地文件）`);
+    console.log(`    GITHUB_REPO   仓库路径，如 ahucslf/froggame`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[server] 启动失败:', err);
+  process.exit(1);
 });
 
 // 优雅退出，确保数据已落盘
