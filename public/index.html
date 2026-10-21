@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏁 青蛙过河 · 排行榜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: linear-gradient(160deg, #1a2740 0%, #0f1626 100%);
+    color: #e8eef8;
+    min-height: 100vh;
+    padding: 32px 20px 60px;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 {
+    font-size: 32px;
+    margin-bottom: 8px;
+    background: linear-gradient(90deg, #ffd66b, #ff9f43);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  header p { color: #8fa3c0; font-size: 14px; }
+
+  /* ── 搜索栏 ── */
+  .search-bar {
+    display: flex; gap: 10px; margin-bottom: 22px;
+    justify-content: center; flex-wrap: wrap;
+  }
+  .search-bar input {
+    flex: 1; min-width: 220px; max-width: 340px;
+    padding: 12px 18px;
+    border-radius: 25px;
+    border: 2px solid #2c3e5c;
+    background: #16213a;
+    color: #e8eef8;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search-bar input:focus { border-color: #4a9eff; }
+  .search-bar button {
+    padding: 12px 26px;
+    border-radius: 25px;
+    border: none;
+    background: linear-gradient(135deg, #4a9eff, #3578e5);
+    color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+    transition: transform .15s, box-shadow .15s;
+  }
+  .search-bar button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(74, 158, 255, .35);
+  }
+
+  /* ── 状态提示 ── */
+  .status {
+    text-align: center; padding: 14px;
+    border-radius: 10px; margin-bottom: 18px;
+    font-size: 13.5px; display: none;
+  }
+  .status.show { display: block; }
+  .status.ok  { background: rgba(46, 213, 115, .12); color: #4ade80; }
+  .status.err { background: rgba(239, 68, 68, .12);  color: #f87171; }
+
+  /* ── 排行榜主体 ── */
+  .board {
+    background: rgba(22, 33, 58, .85);
+    border: 1px solid #2c3e5c;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+  }
+
+  .board-head, .row {
+    display: grid;
+    grid-template-columns: 68px 1fr 110px 90px 100px;
+    gap: 8px; align-items: center;
+    padding: 13px 20px;
+  }
+  .board-head {
+    background: #1d2b47;
+    font-size: 12.5px; color: #8fa3c0;
+    font-weight: 600; letter-spacing: .5px;
+    border-bottom: 1px solid #2c3e5c;
+  }
+
+  /* 可滚动区域 —— 主人要的「滚动看所有排名」 */
+  .board-body { max-height: 460px; overflow-y: auto; }
+  .board-body::-webkit-scrollbar { width: 8px; }
+  .board-body::-webkit-scrollbar-track { background: #16213a; }
+  .board-body::-webkit-scrollbar-thumb {
+    background: #3d5578; border-radius: 4px;
+  }
+  .board-body::-webkit-scrollbar-thumb:hover { background: #4a9eff; }
+
+  .row {
+    border-bottom: 1px solid rgba(44, 62, 92, .5);
+    font-size: 14px;
+    transition: background .2s;
+  }
+  .row:hover { background: rgba(74, 158, 255, .08); }
+  .row:last-child { border-bottom: none; }
+
+  .rank {
+    font-size: 17px; font-weight: 800;
+    text-align: center; color: #8fa3c0;
+  }
+  .rank.top-1 { color: #ffd66b; }
+  .rank.top-2 { color: #e0e6f0; }
+  .rank.top-3 { color: #e8a06a; }
+
+  .name { font-weight: 600; }
+  .score  { color: #ffd66b; font-weight: 700; text-align: right; }
+  .level  { color: #7fd1a0; text-align: right; }
+  .time   { color: #8fa3c0; text-align: right; font-size: 13px; }
+
+  /* 搜索命中的高亮行 */
+  .row.hit {
+    background: rgba(255, 214, 107, .14);
+    box-shadow: inset 3px 0 0 #ffd66b;
+  }
+  .row.hit .name { color: #ffd66b; }
+
+  /* ── 提示条 ── */
+  .hint {
+    text-align: center; margin-top: 18px;
+    font-size: 12.5px; color: #6b7f9c; line-height: 1.8;
+  }
+  .empty {
+    text-align: center; padding: 50px 20px;
+    color: #6b7f9c; font-size: 14px;
+  }
+
+  /* ── 名次徽章配色 ── */
+  .badge { display: inline-block; width: 26px; }
+  .badge.gold   { color: #ffd66b; }
+  .badge.silver { color: #dfe6f2; }
+  .badge.bronze { color: #e8a06a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏁 青蛙过河 · 排行榜</h1>
+    <p>积分 = 关卡数 × 1000 + 时间奖励　|　关卡越多、用时越短，排名越前</p>
+  </header>
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="输入玩家名字搜索…" autocomplete="off">
+    <button id="searchBtn">🔍 搜索</button>
+    <button id="resetBtn" style="background:linear-gradient(135deg,#5a6b85,#3d4a5f)">↺ 全部</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="board">
+    <div class="board-head">
+      <div style="text-align:center">名次</div>
+      <div>玩家</div>
+      <div style="text-align:right">积分</div>
+      <div style="text-align:right">关卡</div>
+      <div style="text-align:right">用时</div>
+    </div>
+    <div class="board-body" id="boardBody">
+      <div class="empty">加载中…</div>
+    </div>
+  </div>
+
+  <div class="hint">
+    📌 排行榜只记录每位玩家的 <b>历史最高分</b>，重复游玩低分不会覆盖已有记录<br>
+    🔄 页面每 30 秒自动刷新一次
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/** 服务端地址。与 Godot 端 LeaderBoardConfig.SERVER_URL 保持一致 */
+const API_BASE = '';
+
+/** 完整榜单缓存，供搜索过滤使用 */
+let boardCache = [];
+
+/** 上一次搜索命中的名字，用于高亮 */
+let hitName = '';
+
+/**
+ * 渲染排行榜到 DOM。
+ * @param {Array<Object>} rows 榜单条目
+ */
+function renderBoard(rows) {
+  const body = document.getElementById('boardBody');
+
+  if (rows.length === 0) {
+    body.innerHTML = '<div class="empty">暂无玩家记录，快去创建第一个成绩吧！</div>';
+    return;
+  }
+
+  body.innerHTML = rows.map(p => {
+    // 前三名用不同颜色的徽章
+    let badgeClass = '';
+    if (p.rank === 1) badgeClass = 'gold';
+    else if (p.rank === 2) badgeClass = 'silver';
+    else if (p.rank === 3) badgeClass = 'bronze';
+
+    const badge = p.rank <= 3
+      ? `<span class="badge ${badgeClass}">${p.rank}</span>`
+      : p.rank;
+
+    const isHit = hitName && p.name === hitName;
+
+    return `
+      <div class="row ${isHit ? 'hit' : ''}">
+        <div class="rank">${badge}</div>
+        <div class="name">${escapeHtml(p.name)}</div>
+        <div class="score">${p.score.toLocaleString()}</div>
+        <div class="level">${p.level}</div>
+        <div class="time">${p.totalTime.toFixed(1)}s</div>
+      </div>`;
+  }).join('');
+
+  // 命中的行滚动到可视区域中央
+  if (hitName) {
+    const hit = body.querySelector('.row.hit');
+    if (hit) {
+      hit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+}
+
+/**
+ * 转义 HTML 特殊字符，防止玩家名字里的尖括号破坏页面结构。
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * 显示状态提示条。
+ * @param {string} message
+ * @param {boolean} isError
+ */
+function showStatus(message, isError) {
+  const el = document.getElementById('status');
+  el.textContent = message;
+  el.className = 'status show ' + (isError ? 'err' : 'ok');
+  if (!isError) {
+    setTimeout(() => { el.className = 'status'; }, 3000);
+  }
+}
+
+/**
+ * 拉取完整排行榜。
+ */
+async function loadBoard() {
+  try {
+    const res = await fetch(API_BASE + '/api/board');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '加载失败');
+
+    boardCache = data.board;
+    renderBoard(filterByName(document.getElementById('searchInput').value));
+  } catch (err) {
+    document.getElementById('boardBody').innerHTML =
+      `<div class="empty">连接服务器失败：${escapeHtml(err.message)}<br>请确认 server.js 已启动</div>`;
+  }
+}
+
+/**
+ * 按关键字过滤缓存的榜单。
+ * @param {string} keyword
+ * @returns {Array<Object>}
+ */
+function filterByName(keyword) {
+  const q = String(keyword || '').trim().toLowerCase();
+  if (!q) {
+    hitName = '';
+    return boardCache;
+  }
+  hitName = '';
+  const matched = boardCache.filter(p => p.name.toLowerCase().includes(q));
+  if (matched.length > 0) {
+    hitName = matched[0].name;
+  }
+  return matched;
+}
+
+/**
+ * 执行搜索：优先调服务端接口，查不到再退回本地过滤。
+ * @param {string} keyword
+ */
+async function doSearch(keyword) {
+  const q = String(keyword || '').trim();
+  if (!q) {
+    hitName = '';
+    renderBoard(boardCache);
+    return;
+  }
+
+  showStatus('搜索中…', false);
+  try {
+    const res = await fetch(API_BASE + '/api/search?q=' + encodeURIComponent(q));
+    const data = await res.json();
+
+    if (!data.ok) throw new Error(data.error);
+    if (data.results.length === 0) {
+      showStatus(`未找到名字包含「${q}」的玩家`, true);
+      hitName = '';
+      renderBoard(boardCache);
+      return;
+    }
+
+    hitName = data.results[0].name;
+    renderBoard(data.results);
+    showStatus(
+      `找到 ${data.results.length} 条结果，最佳：第 ${data.results[0].rank} 名 ${data.results[0].name}（${data.results[0].score} 分）`,
+      false
+    );
+  } catch (err) {
+    // 服务端不可用时退回本地过滤，保证离线也能看
+    const local = filterByName(q);
+    renderBoard(local);
+    showStatus(local.length > 0
+      ? `离线搜索：本地找到 ${local.length} 条`
+      : `未找到「${q}」`, local.length === 0);
+  }
+}
+
+// ── 事件绑定 ──
+document.getElementById('searchBtn').addEventListener('click', () => {
+  doSearch(document.getElementById('searchInput').value);
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  document.getElementById('searchInput').value = '';
+  hitName = '';
+  loadBoard();
+});
+
+document.getElementById('searchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doSearch(e.target.value);
+});
+
+// 实时本地过滤（输入即筛，不用等点按钮）
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  renderBoard(filterByName(e.target.value));
+});
+
+// 首次加载 + 每 30 秒自动刷新
+loadBoard();
+setInterval(loadBoard, 30000);
+</script>
+</body>
+</html>

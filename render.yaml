@@ -1,0 +1,16 @@
+# Render.com 部署配置
+# 用法：把这个文件连同整个文件夹推到 Render，或在 Render 后台手动配置
+services:
+  - type: web
+    name: frogger-leaderboard
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /opt/render/project/src/data

@@ -1,0 +1,16 @@
+{
+  "name": "frogger-leaderboard",
+  "version": "1.0.0",
+  "description": "Frogger 积分排行榜服务",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["frogger", "leaderboard", "game"],
+  "license": "MIT",
+  "dependencies": {},
+  "private": true
+}
