@@ -1,0 +1,26 @@
+# Netlify 部署配置
+#
+# ★ Netlify 是【纯静态托管】，不能运行 Node 服务端 ★
+# 所以它只能托管排行榜网页，/api/* 接口必须由能跑 Node 的平台提供
+# （Render / Railway 等），并在 public/config.js 里填上那个地址。
+#
+# publish 指向 public/，因为 index.html 在那里而不是仓库根目录。
+# 缺这一行 Netlify 会去找根目录的 index.html → 404。
+
+[build]
+  publish = "public"
+  # 纯静态站点，无需构建。用一个空命令避免 Netlify 尝试跑 npm 脚本。
+  command = "echo '静态站点，无需构建'"
+
+# 静态资源缓存
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# API 路径交给外部服务，不在 Netlify 处理（避免 404 误导）
+[[redirects]]
+  from = "/api/*"
+  to = "/api/:splat"
+  status = 200
+  force = true
