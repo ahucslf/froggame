@@ -332,6 +332,8 @@ function submitScore(entry) {
 
   const levelCount = Math.max(0, Math.floor(Number(entry.level) || 0));
   const totalTime = Math.max(0, Number(entry.time) || 0);
+  // 班级号。玩家可留空，留空就存空字符串
+  const classId = String(entry.classId || '').trim().slice(0, 32);
 
   // ★ 一关都没通过就没有有效成绩，不写进榜单 ★
   // 否则榜单上会堆满「0 分 0 关」的垃圾记录。
@@ -364,6 +366,8 @@ function submitScore(entry) {
       existing.score = score;
       existing.level = levelCount;
       existing.totalTime = Number(totalTime.toFixed(2));
+      // 班级号跟着更新（玩家可能换了班级）
+      if (classId) existing.classId = classId;
       existing.updatedAt = new Date().toISOString();
       savePlayers(players);
       return { ok: true, improved: true, record: { ...existing }, board: buildBoard(players) };
@@ -374,6 +378,7 @@ function submitScore(entry) {
 
   const record = {
     name,
+    classId,
     score,
     level: levelCount,
     totalTime: Number(totalTime.toFixed(2)),
@@ -562,12 +567,35 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 班级列表 —— 网页用它做「只看某班」的下拉框
+  if (req.method === 'GET' && pathname === '/api/classes') {
+    const classes = [...new Set(
+      loadPlayers().map((p) => String(p.classId || '')).filter((c) => c.length > 0)
+    )].sort();
+    sendJson(res, 200, { ok: true, classes });
+    return;
+  }
+
+  // 按班级筛选榜单
+  if (req.method === 'GET' && pathname === '/api/board-by-class') {
+    const wanted = String(
+      decodeURIComponent((req.url || '').split('class=')[1] || '')
+    ).trim();
+    const board = buildBoard(loadPlayers())
+      .filter((p) => String(p.classId || '') === wanted);
+    sendJson(res, 200, { ok: true, classId: wanted, board });
+    return;
+  }
+
   // 模糊搜索
   if (req.method === 'GET' && pathname === '/api/search') {
     const q = decodeURIComponent((req.url || '').split('q=')[1] || '').trim().toLowerCase();
     const board = buildBoard(loadPlayers());
     const results = q
-      ? board.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 20)
+      ? board.filter((p) =>
+          p.name.toLowerCase().includes(q) ||
+          String(p.classId || '').toLowerCase().includes(q)
+        ).slice(0, 20)
       : board.slice(0, 20);
     sendJson(res, 200, { ok: true, results });
     return;

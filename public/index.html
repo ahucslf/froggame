@@ -64,6 +64,20 @@
     transition: border-color .2s;
   }
   .search-bar input:focus { border-color: #4a9eff; }
+  .search-bar select {
+    padding: 12px 14px;
+    border-radius: 25px;
+    border: 2px solid #2c3e5c;
+    background: #16213a;
+    color: #e8eef8;
+    font-size: 14px;
+    outline: none;
+    cursor: pointer;
+    min-width: 130px;
+  }
+  .search-bar select:focus { border-color: #4a9eff; }
+  .search-bar option { background: #16213a; color: #e8eef8; }
+
   .search-bar button {
     padding: 12px 26px;
     border-radius: 25px;
@@ -99,7 +113,7 @@
 
   .board-head, .row {
     display: grid;
-    grid-template-columns: 68px 1fr 110px 90px 100px;
+    grid-template-columns: 62px 1fr 108px 96px 62px 82px;
     gap: 8px; align-items: center;
     padding: 13px 20px;
   }
@@ -138,6 +152,11 @@
   .name { font-weight: 600; }
   .score  { color: #ffd66b; font-weight: 700; text-align: right; }
   .level  { color: #7fd1a0; text-align: right; }
+  .cls {
+    color: #9fc3ff; text-align: center; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .nocls { color: #4b5c74; }
   .time   { color: #8fa3c0; text-align: right; font-size: 13px; }
 
   /* 搜索命中的高亮行 */
@@ -173,7 +192,10 @@
   </header>
 
   <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="输入玩家名字搜索…" autocomplete="off">
+    <input type="text" id="searchInput" placeholder="输入玩家名字或班级号搜索…" autocomplete="off">
+    <select id="classSelect" title="只看某个班级">
+      <option value="">全部班级</option>
+    </select>
     <button id="searchBtn">🔍 搜索</button>
     <button id="resetBtn" style="background:linear-gradient(135deg,#5a6b85,#3d4a5f)">↺ 全部</button>
   </div>
@@ -184,6 +206,7 @@
     <div class="board-head">
       <div style="text-align:center">名次</div>
       <div>玩家</div>
+      <div style="text-align:center">班级</div>
       <div style="text-align:right">积分</div>
       <div style="text-align:right">关卡</div>
       <div style="text-align:right">用时</div>
@@ -194,6 +217,7 @@
   </div>
 
   <div class="hint">
+    <span id="classHint"></span><br>
     📌 排行榜只记录每位玩家的 <b>历史最高分</b>，重复游玩低分不会覆盖已有记录<br>
     🔄 页面每 30 秒自动刷新一次
   </div>
@@ -245,10 +269,12 @@ function renderBoard(rows) {
 
     const isHit = hitName && p.name === hitName;
 
+    const classId = p.classId || '';
     return `
       <div class="row ${isHit ? 'hit' : ''}">
         <div class="rank">${badge}</div>
         <div class="name">${escapeHtml(p.name)}</div>
+        <div class="cls">${classId ? escapeHtml(classId) : '<span class="nocls">—</span>'}</div>
         <div class="score">${p.score.toLocaleString()}</div>
         <div class="level">${p.level}</div>
         <div class="time">${p.totalTime.toFixed(1)}s</div>
@@ -299,6 +325,7 @@ async function loadBoard() {
     if (!data.ok) throw new Error(data.error || '加载失败');
 
     boardCache = data.board;
+    await loadClassList(boardCache);
     renderBoard(filterByName(document.getElementById('searchInput').value));
     updateConnBadge(true, '');
   } catch (err) {
@@ -336,18 +363,63 @@ function updateConnBadge(connected, detail) {
 }
 
 /**
+ * 拉取班级列表，填进下拉框。
+ * @param {Array<Object>} board 当前榜单
+ */
+async function loadClassList(board) {
+  const select = document.getElementById('classSelect');
+  if (!select) return;
+
+  // 优先用服务端接口，失败就从已有数据里提取
+  let classes = [];
+  try {
+    const res = await fetch(API_BASE + '/api/classes');
+    const data = await res.json();
+    if (data.ok) classes = data.classes;
+  } catch (e) {
+    classes = [...new Set(board.map(p => p.classId || '').filter(c => c))];
+  }
+
+  const current = select.value;
+  select.innerHTML = '<option value="">全部班级</option>';
+  classes.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    select.appendChild(opt);
+  });
+  // 保持用户当前的选择
+  if (current && classes.includes(current)) select.value = current;
+}
+
+/**
+ * 按班级筛选缓存的榜单。
+ * @param {string} classId 班级号，留空表示全部
+ * @returns {Array<Object>}
+ */
+function filterByClass(classId) {
+  if (!classId) return boardCache;
+  return boardCache.filter(p => (p.classId || '') === classId);
+}
+
+/**
  * 按关键字过滤缓存的榜单。
  * @param {string} keyword
  * @returns {Array<Object>}
  */
 function filterByName(keyword) {
   const q = String(keyword || '').trim().toLowerCase();
+  // 先按班级过滤，再按关键字过滤
+  const base = filterByClass(document.getElementById('classSelect')?.value || '');
   if (!q) {
     hitName = '';
-    return boardCache;
+    return base;
   }
   hitName = '';
-  const matched = boardCache.filter(p => p.name.toLowerCase().includes(q));
+  const matched = base.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    (p.classId || '').toLowerCase().includes(q)
+  );
   if (matched.length > 0) {
     hitName = matched[0].name;
   }
@@ -402,9 +474,38 @@ document.getElementById('searchBtn').addEventListener('click', () => {
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('searchInput').value = '';
+  const select = document.getElementById('classSelect');
+  if (select) select.value = '';
   hitName = '';
   loadBoard();
 });
+
+// 班级下拉框：只看某个班
+document.getElementById('classSelect')?.addEventListener('change', (e) => {
+  const wanted = e.target.value;
+  hitName = '';
+  if (wanted) {
+    const rows = filterByClass(wanted);
+    renderBoard(rows);
+    footerHint(rows.length, wanted);
+  } else {
+    renderBoard(filterByName(document.getElementById('searchInput').value));
+    footerHint(boardCache.length, '');
+  }
+});
+
+/**
+ * 更新底部提示，说明当前在看哪个班的多少人。
+ * @param {number} count 条数
+ * @param {string} classId 班级号，留空表示全部
+ */
+function footerHint(count, classId) {
+  const el = document.getElementById('classHint');
+  if (!el) return;
+  el.textContent = classId
+    ? `正在查看「${classId}」· ${count} 人`
+    : `共 ${count} 名玩家`;
+}
 
 document.getElementById('searchInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') doSearch(e.target.value);
@@ -416,8 +517,16 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
 });
 
 // 首次加载 + 每 30 秒自动刷新
-loadBoard();
-setInterval(loadBoard, 30000);
+loadBoard().then(() => footerHint(boardCache.length, ''));
+setInterval(() => {
+  loadBoard().then(() => {
+    const sel = document.getElementById('classSelect');
+    footerHint(
+      filterByClass(sel?.value || '').length,
+      sel?.value || ''
+    );
+  });
+}, 30000);
 </script>
 </body>
 </html>
