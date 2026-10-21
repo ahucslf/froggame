@@ -171,8 +171,28 @@ function submitScore(entry) {
 
   const levelCount = Math.max(0, Math.floor(Number(entry.level) || 0));
   const totalTime = Math.max(0, Number(entry.time) || 0);
-  const score = Number.isFinite(Number(entry.score))
-    ? Math.max(0, Math.floor(Number(entry.score)))
+
+  // ★ 一关都没通过就没有有效成绩，不写进榜单 ★
+  // 否则榜单上会堆满「0 分 0 关」的垃圾记录。
+  // 客户端也会先挡一道，这里是服务端兜底。
+  if (levelCount <= 0) {
+    return {
+      ok: true,
+      improved: false,
+      skipped: true,
+      error: '本局没有通关成绩，不计入排行榜',
+      record: null,
+      board: buildBoard(loadPlayers())
+    };
+  }
+
+  // ★ 分数优先用客户端传来的，但 0 / 缺失 / 非法时必须自己算 ★
+  // 之前写成 `Number.isFinite(Number(entry.score)) ? ... : computeScore(...)`，
+  // 结果传 score=0 会被当成「合法分数 0」存进榜单 —— 一局 6 关 70 秒的正常成绩
+  // 变成 0 分。0 是「没传分数」的标记，不是合法分数。
+  const providedScore = Number(entry.score);
+  const score = (Number.isFinite(providedScore) && providedScore > 0)
+    ? Math.floor(providedScore)
     : computeScore(levelCount, totalTime);
 
   const players = loadPlayers();
