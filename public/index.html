@@ -9,6 +9,14 @@
 
   body {
     font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    /* ★ 禁用「合成粗体」★
+       字体没有对应字重时，浏览器会把文字画两遍错开 1px 来伪造粗体，
+       中文字笔画会因此发虚发糊（主人说的「字前面有点糊」）。
+       font-synthesis: none 让它用最接近的真实字重，笔画立刻清晰。 */
+    font-synthesis: none;
+    /* macOS 上用灰度抗锯齿，文字边缘更干净 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     /* ★ 背景图：马路场景 ★ */
     /* fixed 让背景不随内容滚动，像贴在视口上 */
     background: #0f1626 url("assets/road-bg.jpg") fixed center center / cover no-repeat;
@@ -39,13 +47,19 @@
 
   header { text-align: center; margin-bottom: 28px; }
   header h1 {
-    font-size: 32px;
-    margin-bottom: 8px;
-    background: linear-gradient(90deg, #ffd66b, #ff9f43);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    /* 投影，保证在明亮背景上也看得清 */
-    text-shadow: 0 2px 12px rgba(0, 0, 0, .8);
+    font-size: 36px;
+    margin-bottom: 10px;
+    letter-spacing: 2px;
+    /* ★ 金色渐变字 ★
+       原来用了 -webkit-text-fill-color: transparent + background-clip: text，
+       配合 text-shadow 会出现「描边糊」的效果（主人说的字有点糊）。
+       现在改成实心金色 + 描边，字更清晰。 */
+    color: #ffd66b;
+    text-shadow:
+      0 0 18px rgba(255, 159, 67, .55),
+      0 2px 4px rgba(0, 0, 0, .9),
+      0 0 2px rgba(0, 0, 0, .8);
+    -webkit-text-stroke: 1px rgba(120, 60, 0, .45);
   }
   header p {
     color: #b8c6dc;
@@ -92,7 +106,7 @@
   }
   .search-bar input:focus { border-color: #4a9eff; }
   .search-bar select {
-    padding: 12px 14px;
+    padding: 12px 40px 12px 18px;
     border-radius: 25px;
     border: 2px solid #2c3e5c;
     background: #16213a;
@@ -101,6 +115,26 @@
     outline: none;
     cursor: pointer;
     min-width: 130px;
+    /* ★ 干掉浏览器自带的原生下拉箭头 ★
+       它在圆角边框里会「凸出来」一截（主人标注的问题）。
+       这里用 appearance:none 隐藏，然后用 background-image 自己画一个内联的箭头。 */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, #8fa3c0 50%),
+      linear-gradient(135deg, #8fa3c0 50%, transparent 50%);
+    background-position:
+      calc(100% - 20px) calc(50% - 2px),
+      calc(100% - 14px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+  }
+  /* hover 时箭头变亮 */
+  .search-bar select:hover {
+    background-image:
+      linear-gradient(45deg, transparent 50%, #ffd66b 50%),
+      linear-gradient(135deg, #ffd66b 50%, transparent 50%);
   }
   .search-bar select:focus { border-color: #4a9eff; }
   .search-bar option { background: #16213a; color: #e8eef8; }
@@ -143,7 +177,8 @@
 
   .board-head, .row {
     display: grid;
-    grid-template-columns: 62px 1fr 108px 96px 62px 82px;
+    /* ★ 加了「奖牌」列 ★ 62px名次 | 34px奖牌 | 1fr玩家 | ... */
+    grid-template-columns: 62px 34px 1fr 108px 96px 62px 82px;
     gap: 8px; align-items: center;
     padding: 13px 20px;
   }
@@ -179,7 +214,23 @@
   .rank.top-2 { color: #e0e6f0; }
   .rank.top-3 { color: #e8a06a; }
 
-  .name { font-weight: 600; }
+  /* ── 奖牌（金银铜）── */
+  /* 放在玩家名字前面。用 emoji 最直观，Windows 上是 Segoe UI Emoji。 */
+  .medal {
+    text-align: center;
+    font-size: 19px;
+    line-height: 1;
+    /* 奖牌在深色背景上加一点辉光 */
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .7));
+  }
+
+  /* ★ 名字列 ★
+     font-weight: 600 + body 上的 font-synthesis: none 组合效果最好：
+     · macOS：PingFang SC 有真实的 Semibold(600)，笔画清晰
+     · Windows：微软雅黑只有 400/700，600 本来会被【合成粗体】
+                 （把字画两遍错开 1px）→ 笔画发虚发糊。
+                 禁掉合成后会自动回退到真实的 Bold(700)，一样清晰。 */
+  .name { font-weight: 600; font-size: 14.5px; }
   .score  { color: #ffd66b; font-weight: 700; text-align: right; }
   .level  { color: #7fd1a0; text-align: right; }
   .cls {
@@ -216,8 +267,8 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>🏁 青蛙过河 · 排行榜</h1>
-    <p>积分 = 关卡数 × 1000 + 时间奖励　|　关卡越多、用时越短，排名越前</p>
+    <h1>⚠️ 危险过街 排行榜</h1>
+    <p>积分 = 关卡数 × 1000 + 时间奖励　|　穿越车流越多、用时越短，排名越前</p>
     <div id="connBadge" class="conn-badge">○ 检测中…</div>
   </header>
 
@@ -235,6 +286,7 @@
   <div class="board">
     <div class="board-head">
       <div style="text-align:center">名次</div>
+      <div style="text-align:center">奖牌</div>
       <div>玩家</div>
       <div style="text-align:center">班级</div>
       <div style="text-align:right">积分</div>
@@ -297,12 +349,17 @@ function renderBoard(rows) {
       ? `<span class="badge ${badgeClass}">${p.rank}</span>`
       : p.rank;
 
+    // ★ 奖牌：前三名分别拿金、银、铜 ★
+    const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+    const medal = MEDALS[p.rank] || '';
+
     const isHit = hitName && p.name === hitName;
 
     const classId = p.classId || '';
     return `
       <div class="row ${isHit ? 'hit' : ''}">
         <div class="rank">${badge}</div>
+        <div class="medal">${medal}</div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="cls">${classId ? escapeHtml(classId) : '<span class="nocls">—</span>'}</div>
         <div class="score">${p.score.toLocaleString()}</div>
