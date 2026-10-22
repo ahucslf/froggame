@@ -627,6 +627,39 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ★ 清理异常记录（一次性维护用）★
+  //
+  // 背景：客户端曾经有个计时 bug —— _run_time 一直累加不清零，
+  // 导致提交的 totalTime 能到 600 多秒，网页上显示「671.1s」很难看。
+  // 那个 bug 已经修了，但历史脏数据还在榜上。
+  //
+  // 这个接口把「用时明显不合理」的记录删掉：
+  // 判定条件 = totalTime > 阈值（默认 300 秒）
+  // 正常玩家单关最多也就几十秒，300 秒足够宽松。
+  //
+  // 用法：GET /api/cleanup-anomalies?maxTime=300
+  if (req.method === 'GET' && pathname === '/api/cleanup-anomalies') {
+    const maxTime = Math.max(1, Number((req.url || '').split('maxTime=')[1]) || 300);
+    const players = loadPlayers();
+    const before = players.length;
+    const kept = players.filter((p) => Number(p.totalTime || 0) <= maxTime);
+    const removed = before - kept.length;
+    if (removed > 0) {
+      savePlayers(kept);
+    }
+    const details = players
+      .filter((p) => Number(p.totalTime || 0) > maxTime)
+      .map((p) => ({ name: p.name, totalTime: p.totalTime, level: p.level }));
+    sendJson(res, 200, {
+      ok: true,
+      removed,
+      remaining: kept.length,
+      maxTime,
+      details,
+    });
+    return;
+  }
+
   // 提交成绩
   if (req.method === 'POST' && pathname === '/api/score') {
     const ip = clientIp(req);
