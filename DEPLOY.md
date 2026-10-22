@@ -210,3 +210,60 @@ Personal access tokens → Tokens (classic) → Generate new token
 
 行，但数据会在实例重启后丢失。只适合临时演示。
 
+
+---
+
+## 🔥 数据丢失问题（重要）
+
+### 现象
+「成绩传上去了，但网页上又没了」
+
+### 根本原因
+**Render 免费版用的是临时文件系统：**
+- 重新部署 → 数据清空
+- **空闲 15 分钟休眠 → 唤醒时重启 → 数据再清空**
+
+`render.yaml` 里原来的 `DATA_DIR` 指向 `/opt/render/project/src/data`，
+那是**项目源码目录**，每次重新部署都会被整个重置 —— 数据必丢。
+
+### 验证方法
+```bash
+curl https://froggame.onrender.com/api/health
+# 看 storage 字段：
+#   "storage": "local"   ← 临时盘，重启就丢
+#   "storage": "github"  ← 持久化，OK
+```
+再看 `uptime`：如果它刚变成很小的数字，说明实例重启过，
+这时榜单多半已经空了。
+
+### ✅ 解决：配 GITHUB_TOKEN
+
+**代码已经就绪**（不需要改任何代码），只要在 Render 后台加一个环境变量：
+
+1. GitHub → 右上角头像 → **Settings** → **Developer settings**
+2. 左侧最下面 → **Personal access tokens** → **Tokens (classic)**
+3. 点 **Generate new token (classic)**
+4. 勾选 **`repo`** 权限 → 滑到底 → **Generate token**
+5. **复制令牌**（只显示一次！）
+6. 回到 Render → 你的服务 → **Environment** → **Add Environment Variable**
+   - Key: `GITHUB_TOKEN`
+   - Value: 粘贴刚才的令牌
+7. 保存 → Render 会自动重新部署
+
+### 验证是否成功
+```bash
+curl https://froggame.onrender.com/api/health
+# 看到 "storage": "github" 就说明生效了 ✅
+```
+
+之后数据会存在 GitHub 仓库的 `data/players.json`，
+实例重启、休眠唤醒、重新部署都不会丢。
+
+### 顺便修的：0 关成绩被丢弃
+之前服务端有这层防护：
+```js
+if (levelCount <= 0) { return { skipped: true, ... } }
+```
+玩家**第 1 关就被撞死**时，整局成绩完全没上报，网页上永远看不到。
+现在改成只有非法值才拒绝，0 关照常上榜（分数是 0）。
+
