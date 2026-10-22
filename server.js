@@ -355,6 +355,7 @@ function submitScore(entry) {
     return { ok: false, error: '名字不能为空', improved: false, record: null, board: buildBoard(loadPlayers()) };
   }
 
+  // 关卡数。负数是非法值，归零处理（0 关仍然是一局有效记录）
   const levelCount = Math.max(0, Math.floor(Number(entry.level) || 0));
   const totalTime = Math.max(0, Number(entry.time) || 0);
   // 班级号。玩家可留空，留空就存空字符串
@@ -364,17 +365,7 @@ function submitScore(entry) {
   // 之前这里直接返回 skipped，把玩家「第 1 关就被撞死」的成绩整局丢掉 ——
   // 网页上完全看不到这条记录，主人会以为「成绩没传上去」。
   //
-  // 但 level < 0 是非法值（客户端不会传负数），直接拒绝。
-  if (levelCount < 0) {
-    return {
-      ok: true,
-      improved: false,
-      skipped: true,
-      error: '无效的关卡数',
-      record: null,
-      board: buildBoard(loadPlayers())
-    };
-  }
+  // 负数在上面的 Math.max 里已经归零，所以这里不需要再拦。
 
   // ★ 分数优先用客户端传来的，但 0 / 缺失 / 非法时必须自己算 ★
   // 之前写成 `Number.isFinite(Number(entry.score)) ? ... : computeScore(...)`，
