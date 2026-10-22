@@ -12,13 +12,31 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # ★ 数据目录 ★
+      # ★★ 重要：不要指向 /opt/render/project/src/data ★★
+      # 那是项目源码目录，Render 每次【重新部署】都会把它整个重置，
+      # 数据会随之清空 —— 这就是「成绩传上去了但网页上又没了」的原因。
+      #
+      # Render 免费版【没有】持久磁盘，任何本地路径都会丢。
+      # 真正的解决办法是配 GITHUB_TOKEN（见下），数据存到 GitHub 仓库。
       - key: DATA_DIR
-        value: /opt/render/project/src/data
-      # ★ 数据持久化 ★
-      # Render 免费版用临时文件系统，部署或空闲休眠唤醒都会清空数据。
-      # 配上下面两个变量，数据就会存到 GitHub 仓库，实例重启也不丢。
-      # GITHUB_TOKEN 在 Render 后台 → Environment 里设为 Secret（不要提交到仓库）
-      # GITHUB_REPO  设为 ahucslf/froggame
+        value: /tmp/frogger-data
+
+      # ★ 数据持久化（重要）★
+      # Render 免费版的文件系统是临时的：
+      #   · 重新部署 → 数据清空
+      #   · 空闲 15 分钟休眠 → 唤醒时重启 → 数据再清空
+      #
+      # 配上 GITHUB_TOKEN 后，数据会存到 GitHub 仓库，实例重启也不丢。
+      #
+      # 【怎么配 GITHUB_TOKEN】
+      # 1. GitHub → 右上角头像 → Settings → Developer settings
+      # 2. Personal access tokens → Tokens (classic) → Generate new token
+      # 3. 勾选 repo 权限 → Generate → 复制（只显示一次）
+      # 4. 回到 Render → 这个服务 → Environment → Add Environment Variable
+      # 5. Key 填 GITHUB_TOKEN，Value 粘贴令牌
+      #
+      # 配好后访问 /api/health，看到 "storage": "github" 就说明生效了。
       - key: GITHUB_REPO
         value: ahucslf/froggame
       - key: GITHUB_BRANCH

@@ -295,9 +295,34 @@ function savePlayers(players) {
     githubSave(players).then((ok) => {
       if (ok) {
         console.log('[github] 数据已同步到仓库');
+      } else {
+        console.error('[github] 写入失败，本地仍有副本');
       }
     });
   }
+}
+
+/**
+ * 标记数据「已变更」，等一小段时间后合并写入。
+ *
+ * ★ 为什么需要合并写入 ★
+ * 一局游戏可能连续提交多次（存档 + 死亡结算），
+ * 每次都打一次 GitHub API 容易撞上速率限制。
+ * 这里把短时间内的多次变更合并成一次写入。
+ */
+let pendingSaveTimer = null;
+function scheduleSave() {
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer);
+  }
+  pendingSaveTimer = setTimeout(() => {
+    pendingSaveTimer = null;
+    if (USE_GITHUB) {
+      githubSave(playerCache).then((ok) => {
+        if (ok) console.log('[github] 数据已同步到仓库');
+      });
+    }
+  }, 800);
 }
 
 /** 排序：分数降序 → 关卡多者优先 → 用时短者优先 → 名字字典序兜底 */
@@ -335,15 +360,17 @@ function submitScore(entry) {
   // 班级号。玩家可留空，留空就存空字符串
   const classId = String(entry.classId || '').trim().slice(0, 32);
 
-  // ★ 一关都没通过就没有有效成绩，不写进榜单 ★
-  // 否则榜单上会堆满「0 分 0 关」的垃圾记录。
-  // 客户端也会先挡一道，这里是服务端兜底。
-  if (levelCount <= 0) {
+  // ★ level == 0 也要上榜 ★
+  // 之前这里直接返回 skipped，把玩家「第 1 关就被撞死」的成绩整局丢掉 ——
+  // 网页上完全看不到这条记录，主人会以为「成绩没传上去」。
+  //
+  // 但 level < 0 是非法值（客户端不会传负数），直接拒绝。
+  if (levelCount < 0) {
     return {
       ok: true,
       improved: false,
       skipped: true,
-      error: '本局没有通关成绩，不计入排行榜',
+      error: '无效的关卡数',
       record: null,
       board: buildBoard(loadPlayers())
     };
@@ -652,7 +679,19 @@ async function restoreData() {
     }
   } else {
     loadPlayers();
-    console.log(`[data] 已加载 ${loadPlayers().length} 条记录（本地文件）`);
+    const count = loadPlayers().length;
+    console.log(`[data] 已加载 ${count} 条记录（本地文件）`);
+    if (count === 0) {
+      // ★ 本地空 + 开了 GitHub 存储 → 可能是实例刚重启，数据在仓库里 ★
+      // 异步再试一次拉取，拉到就写回本地并直接用它。
+      githubLoad().then((remote) => {
+        if (remote && remote.length > 0) {
+          playerCache = remote;
+          saveLocal(remote);
+          console.log(`[github] 从仓库恢复了 ${remote.length} 条记录`);
+        }
+      }).catch(() => {});
+    }
   }
 }
 
