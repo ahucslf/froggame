@@ -477,13 +477,21 @@ const MIME_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
   '.ico': 'image/x-icon'
 };
 
 /** 提供静态文件，带目录穿越防护 */
 function serveStatic(res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
-  const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
+  // ★ 剥掉前导斜杠 ★
+  // path.join(PUBLIC_DIR, '/assets/x.jpg') 在不同 Node 版本下行为不一致，
+  // 统一剥掉前导斜杠最稳 —— 得到 assets/x.jpg，再拼到 PUBLIC_DIR 后面。
+  const relPath = rel.replace(/^\/+/, '');
+  const filePath = path.normalize(path.join(PUBLIC_DIR, relPath));
 
   // 归一化后必须仍在 PUBLIC_DIR 之内
   if (!filePath.startsWith(PUBLIC_DIR)) {

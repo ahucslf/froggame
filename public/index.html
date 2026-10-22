@@ -9,13 +9,33 @@
 
   body {
     font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
-    background: linear-gradient(160deg, #1a2740 0%, #0f1626 100%);
+    /* ★ 背景图：马路场景 ★ */
+    /* fixed 让背景不随内容滚动，像贴在视口上 */
+    background: #0f1626 url("assets/road-bg.jpg") fixed center center / cover no-repeat;
     color: #e8eef8;
     min-height: 100vh;
     padding: 32px 20px 60px;
+    position: relative;
   }
 
-  .wrap { max-width: 880px; margin: 0 auto; }
+  /* ★ 暗色遮罩 ★
+     背景图是明亮的马路场景，直接铺在文字下面会看不清字。
+     这里叠一层半透明深色，把整体压暗，文字才清晰。
+     ★ 遮罩不能太重 ★ 太重的话背景图就等于没加。 */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(180deg,
+      rgba(10, 16, 28, .72) 0%,
+      rgba(10, 16, 28, .55) 45%,
+      rgba(10, 16, 28, .78) 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 所有内容都在遮罩之上 */
+  .wrap { max-width: 880px; margin: 0 auto; position: relative; z-index: 1; }
 
   header { text-align: center; margin-bottom: 28px; }
   header h1 {
@@ -24,8 +44,15 @@
     background: linear-gradient(90deg, #ffd66b, #ff9f43);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    /* 投影，保证在明亮背景上也看得清 */
+    text-shadow: 0 2px 12px rgba(0, 0, 0, .8);
   }
-  header p { color: #8fa3c0; font-size: 14px; }
+  header p {
+    color: #b8c6dc;
+    font-size: 14px;
+    /* 描边式投影，比纯色块更自然 */
+    text-shadow: 0 1px 6px rgba(0, 0, 0, .9);
+  }
 
   /* ── 连接状态徽章 ── */
   .conn-badge {
@@ -104,11 +131,14 @@
 
   /* ── 排行榜主体 ── */
   .board {
-    background: rgba(22, 33, 58, .85);
+    /* ★ 底色加深 ★ 背景图铺在下面，半透明卡片会让表格文字发花 */
+    background: rgba(16, 25, 43, .94);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     border: 1px solid #2c3e5c;
     border-radius: 16px;
     overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .45);
   }
 
   .board-head, .row {
