@@ -88,7 +88,11 @@ const RATE_LIMIT_MAX = 20;
 // 不配的话行为和之前完全一样（用本地文件）。
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const GITHUB_REPO = process.env.GITHUB_REPO || '';
+// ★ 仓库路径要有默认值 ★
+// 之前默认空字符串 → 没配环境变量时请求打到 `/repos//contents/...`，
+// GitHub 直接 404，而且日志里什么都不打印 —— 恢复逻辑静默失效。
+// 仓库是【公开】的，所以读取（restoreData）不需要令牌也能工作。
+const GITHUB_REPO = process.env.GITHUB_REPO || 'ahucslf/froggame';
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 const GITHUB_FILE = process.env.GITHUB_FILE || 'data/players.json';
 /** GitHub API 超时（毫秒） */
@@ -106,17 +110,34 @@ const USE_GITHUB = Boolean(GITHUB_TOKEN && GITHUB_REPO);
  */
 function githubApi(method, apiPath, payload) {
   return new Promise((resolve) => {
+    const headers = {
+      'Accept': 'application/vnd.github+json',
+      'User-Agent': 'frogger-leaderboard',
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
+
+    // ★ 只有真的拿到令牌时才带 Authorization ★
+    //
+    // 之前的 bug：无条件发 `Authorization: Bearer `（令牌为空时末尾是空的），
+    // GitHub 会把这个当成「无效凭据」直接返回 401 ——
+    // 连【公开仓库的匿名读取】都被搞挂了。
+    //
+    // 后果很严重：restoreData() 里的兜底逻辑（本地空 → 从仓库恢复）
+    // 永远拿不到数据，实例重启后榜单必然清空。
+    //
+    // 实测：
+    //   不带 Authorization      → 200 ✅
+    //   带空 Bearer             → 401 ❌
+    if (GITHUB_TOKEN) {
+      headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
+    }
+
     const options = {
       hostname: 'api.github.com',
       port: 443,
       path: apiPath,
       method,
-      headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'frogger-leaderboard',
-        'X-GitHub-Api-Version': '2022-11-28'
-      }
+      headers
     };
     if (payload) {
       options.headers['Content-Type'] = 'application/json';
@@ -714,15 +735,22 @@ async function restoreData() {
     const count = loadPlayers().length;
     console.log(`[data] 已加载 ${count} 条记录（本地文件）`);
     if (count === 0) {
-      // ★ 本地空 + 开了 GitHub 存储 → 可能是实例刚重启，数据在仓库里 ★
+      // ★ 本地空 → 可能是实例刚重启（临时盘被清），数据在仓库里 ★
       // 异步再试一次拉取，拉到就写回本地并直接用它。
+      // 公开仓库【不需要令牌】也能读，所以这条兜底路径在没有令牌时也有效。
+      console.log('[github] 本地为空，尝试从仓库恢复…');
       githubLoad().then((remote) => {
         if (remote && remote.length > 0) {
           playerCache = remote;
           saveLocal(remote);
           console.log(`[github] 从仓库恢复了 ${remote.length} 条记录`);
+        } else {
+          // ★ 失败要打日志 ★ 之前这里是静默的，出问题完全看不见
+          console.warn('[github] 仓库里没有可用数据（或读取失败），本次从空榜开始');
         }
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn('[github] 恢复失败:', err && err.message ? err.message : err);
+      });
     }
   }
 }
