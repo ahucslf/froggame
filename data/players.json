@@ -1,20 +1,20 @@
 {
   "players": [
     {
+      "name": "刘飞",
+      "classId": "23001",
+      "score": 8629,
+      "level": 4,
+      "totalTime": 4.28,
+      "updatedAt": "2026-11-02T08:09:35.342Z"
+    },
+    {
       "name": "cc",
       "classId": "32419",
       "score": 4557,
       "level": 3,
       "totalTime": 6.08,
       "updatedAt": "2026-10-27T07:21:44.859Z"
-    },
-    {
-      "name": "刘飞",
-      "classId": "32419",
-      "score": 3106,
-      "level": 2,
-      "totalTime": 2.35,
-      "updatedAt": "2026-10-27T07:20:50.229Z"
     },
     {
       "name": "cv",

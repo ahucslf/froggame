@@ -323,8 +323,151 @@ const API_BASE = (typeof window !== 'undefined' && window.LEADERBOARD_API) || ''
 /** 完整榜单缓存，供搜索过滤使用 */
 let boardCache = [];
 
+/**
+ * localStorage 的键名：本机榜单缓存。
+ *
+ * ★ 为什么要这层缓存 ★
+ * 服务端跑在 Render 免费实例上，数据只落在容器磁盘里 ——
+ * 实例一旦休眠/重启，磁盘回到镜像里的旧快照，玩家新登的榜就没了。
+ * 浏览器本地的这份副本不受服务端重启影响，是最后一道保险。
+ */
+const LS_KEY = 'frogger_board_v1';
+
 /** 上一次搜索命中的名字，用于高亮 */
 let hitName = '';
+
+// ─────────────────────────────────────────────────────────────
+// 本机持久层：localStorage 里永远留一份见过的最高纪录
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 判断一条记录是否可用。宁可丢掉脏数据，也不让页面渲染时崩掉。
+ * @param {Object} p
+ * @returns {boolean}
+ */
+function isValidRow(p) {
+  return !!p
+    && typeof p.name === 'string'
+    && p.name.trim().length > 0
+    && Number.isFinite(Number(p.score));
+}
+
+/**
+ * 读取本机缓存的榜单。数据坏了就当空数组，绝不让页面白屏。
+ * @returns {Array<Object>}
+ */
+function loadLocalBoard() {
+  try {
+    const raw = window.localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isValidRow) : [];
+  } catch (err) {
+    console.warn('[board] 本机缓存读取失败，忽略:', err);
+    return [];
+  }
+}
+
+/**
+ * 把榜单写进本机。隐私模式 / 配额满时会抛异常，这属于正常情况，吞掉即可。
+ * @param {Array<Object>} rows
+ */
+function saveLocalBoard(rows) {
+  try {
+    window.localStorage.setItem(LS_KEY, JSON.stringify(rows));
+  } catch (err) {
+    console.warn('[board] 本机缓存写入失败（隐私模式或空间不足）:', err);
+  }
+}
+
+/**
+ * 排序并重新编号。
+ *
+ * 规则必须和服务端 sortPlayers() 完全一致，否则合并出来的名次会跳号。
+ * @param {Array<Object>} rows
+ * @returns {Array<Object>}
+ */
+function rankRows(rows) {
+  return rows
+    .filter(isValidRow)
+    .slice()
+    .sort((a, b) => {
+      const scoreDiff = Number(b.score) - Number(a.score);
+      if (scoreDiff !== 0) return scoreDiff;
+      const levelDiff = Number(b.level || 0) - Number(a.level || 0);
+      if (levelDiff !== 0) return levelDiff;
+      const timeDiff = Number(a.totalTime || 0) - Number(b.totalTime || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return String(a.name).localeCompare(String(b.name));
+    })
+    .map((p, i) => ({ ...p, rank: i + 1 }));
+}
+
+/**
+ * 按名字合并服务端榜单与本机缓存，同一个人只留最高分。
+ *
+ * @param {Array<Object>} server 服务端返回的记录
+ * @param {Array<Object>} local  本机缓存的记录
+ * @returns {Array<Object>} 未排序的合并结果（同名字只有一条）
+ */
+function mergeBoards(server, local) {
+  const byName = new Map();
+
+  const put = (row) => {
+    if (!isValidRow(row)) return;
+    const name = row.name.trim();
+    const prev = byName.get(name);
+    if (!prev || Number(row.score) > Number(prev.score)) {
+      byName.set(name, { ...row, name });
+    }
+  };
+
+  server.forEach(put);
+  local.forEach(put);
+  return [...byName.values()];
+}
+
+/**
+ * 把本机有、服务端没有的记录写回服务器。
+ *
+ * ★ 为什么值得自动做 ★
+ * 服务端重启后榜单会回到旧快照。只要有人打开这个网页，
+ * 本机的副本就能把丢掉的人「捞」回来，不需要主人手动补录。
+ * /api/score 对同一个人只接受更高分，所以重复调用是安全的。
+ *
+ * @param {Array<Object>} rows 需要回补的记录
+ */
+async function backfillBoard(rows) {
+  let restored = 0;
+
+  for (const r of rows.slice(0, 50)) {
+    try {
+      const res = await fetch(API_BASE + '/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: r.name,
+          classId: r.classId || '',
+          level: Number(r.level) || 0,
+          time: Number(r.totalTime) || 0,
+          score: Number(r.score) || 0
+        })
+      });
+      const data = await res.json();
+      if (data.ok) restored += 1;
+    } catch (err) {
+      // 断网就别硬撑，剩下的下次打开页面再说
+      console.warn('[board] 回补中断:', err);
+      break;
+    }
+  }
+
+  if (restored > 0) {
+    showStatus(`已从本机缓存回补 ${restored} 条记录到服务器`, false);
+    // 回补完再拉一次，让名次以服务端为准（此时服务端已经补齐，不会重复回补）
+    setTimeout(() => { loadBoard(); }, 700);
+  }
+}
 
 /**
  * 渲染排行榜到 DOM。
@@ -362,9 +505,9 @@ function renderBoard(rows) {
         <div class="medal">${medal}</div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="cls">${classId ? escapeHtml(classId) : '<span class="nocls">—</span>'}</div>
-        <div class="score">${p.score.toLocaleString()}</div>
-        <div class="level">${p.level}</div>
-        <div class="time">${p.totalTime.toFixed(1)}s</div>
+        <div class="score">${Number(p.score || 0).toLocaleString()}</div>
+        <div class="level">${Number(p.level || 0)}</div>
+        <div class="time">${Number(p.totalTime || 0).toFixed(1)}s</div>
       </div>`;
   }).join('');
 
@@ -403,19 +546,53 @@ function showStatus(message, isError) {
 }
 
 /**
- * 拉取完整排行榜。
+ * 拉取完整排行榜，并与本机缓存合并。
+ *
+ * 三条路径：
+ *   1. 服务端正常  → 服务端 + 本机合并后渲染，顺手把结果存一份到本机
+ *   2. 服务端缺人  → 本机缓存补上，并自动写回服务器（服务重启后靠这个自救）
+ *   3. 服务端连不上 → 直接用本机缓存渲染，页面不至于空着
  */
 async function loadBoard() {
+  const localRows = loadLocalBoard();
+  const keyword = document.getElementById('searchInput').value;
+
   try {
     const res = await fetch(API_BASE + '/api/board');
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '加载失败');
 
-    boardCache = data.board;
+    const serverRows = Array.isArray(data.board) ? data.board : [];
+
+    // ★ 合并后统一重排 ★
+    // 服务端给的 rank 只对服务端那部分有效，塞进本机记录后必须重新编号，
+    // 否则会出现「两个第 3 名」这种跳号。
+    boardCache = rankRows(mergeBoards(serverRows, localRows));
+    saveLocalBoard(boardCache);
+
     await loadClassList(boardCache);
-    renderBoard(filterByName(document.getElementById('searchInput').value));
+    renderBoard(filterByName(keyword));
     updateConnBadge(true, '');
+
+    // 服务端缺的人 → 从本机补回去
+    const missing = localRows.filter(
+      (r) => !serverRows.some((s) => String(s.name).trim() === r.name.trim())
+    );
+    if (missing.length > 0) {
+      backfillBoard(missing);
+    }
   } catch (err) {
+    // 服务端不可用 —— 本机有数据就先顶上，不让页面变成一片空白
+    boardCache = rankRows(localRows);
+    await loadClassList(boardCache);
+
+    if (boardCache.length > 0) {
+      renderBoard(filterByName(keyword));
+      updateConnBadge(false, err.message);
+      showStatus(`连不上排行榜服务，先显示本机缓存的 ${boardCache.length} 条记录`, true);
+      return;
+    }
+
     document.getElementById('boardBody').innerHTML =
       `<div class="empty">
          连接服务器失败：${escapeHtml(err.message)}<br>
@@ -504,8 +681,8 @@ function filterByName(keyword) {
   }
   hitName = '';
   const matched = base.filter(p =>
-    p.name.toLowerCase().includes(q) ||
-    (p.classId || '').toLowerCase().includes(q)
+    String(p.name || '').toLowerCase().includes(q) ||
+    String(p.classId || '').toLowerCase().includes(q)
   );
   if (matched.length > 0) {
     hitName = matched[0].name;
